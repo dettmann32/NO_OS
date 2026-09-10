@@ -3,9 +3,9 @@
 /* Entry point - onde o kernel começa a executar */
 ENTRY(_start)
 
-/* Endereço base do kernel na memória (1MB = 0x100000) */
-/* Este é o endereço padrão onde o bootloader carrega o kernel */
-KERNEL_BASE = 0x100000;
+/* Endereço base do kernel na memória (64KB = 0x10000) */
+/* Deve bater com KERNEL_OFFSET em boot.asm */
+KERNEL_BASE = 0x10000;
 
 SECTIONS
 {

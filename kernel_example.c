@@ -55,6 +55,8 @@ void init_bss(void) {
 }
 
 // Entry point do kernel
+// Deve ser a PRIMEIRA função do binário: o bootloader pula para 0x10000
+__attribute__((section(".text.boot"), used))
 void _start(void) {
     // Inicializar BSS
     init_bss();

@@ -1,32 +1,33 @@
 #!/bin/bash
 # Script para testar o kernel
 
-echo "=== Teste do Kernel Bare-Metal x86_64 ==="
+echo "=== Teste do Kernel Bare-Metal ==="
+echo ""
+
+# Compilar tudo (boot.bin, kernel.bin e os.img)
+echo "Compilando..."
+make clean >/dev/null
+if ! make; then
+    echo "Erro na compilação!"
+    exit 1
+fi
 echo ""
 
 # Verificar se os arquivos existem
-if [ ! -f "boot.bin" ]; then
-    echo "Erro: boot.bin não encontrado!"
-    exit 1
-fi
+for file in boot.bin kernel.bin os.img; do
+    if [ ! -f "$file" ]; then
+        echo "Erro: $file não encontrado!"
+        exit 1
+    fi
+done
 
-if [ ! -f "kernel.bin" ]; then
-    echo "Erro: kernel.bin não encontrado!"
-    exit 1
-fi
-
-echo "Arquivos encontrados:"
-ls -lh boot.bin kernel.bin
-echo ""
-
-# Compilar kernel (se necessário)
-echo "Compilando kernel..."
-make
+echo "Arquivos gerados:"
+ls -lh boot.bin kernel.bin os.img
 echo ""
 
 # Testar com QEMU
 echo "Iniciando teste com QEMU..."
-echo "Pressione Ctrl+A然后X para sair do QEMU"
+echo "Pressione Ctrl+A X para sair do QEMU"
 echo ""
 
-qemu-system-x86_64 -drive file=boot.bin,format=raw -m 128M
+qemu-system-x86_64 -drive file=os.img,format=raw -m 128M
