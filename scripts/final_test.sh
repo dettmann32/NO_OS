@@ -9,7 +9,7 @@ echo ""
 
 # Verificar se os arquivos existem
 echo "1. Verificando arquivos..."
-files=("boot/boot.asm" "kernel/main.c" "kernel/arch/x86/idt.c" "kernel/arch/x86/pic.c" "kernel/drivers/vga.c" "kernel/drivers/pit.c" "kernel/drivers/console.c" "kernel/drivers/keyboard.c" "kernel/init/bss.c" "linker/kernel.ld" "Makefile")
+files=("boot/boot.asm" "kernel/main.c" "kernel/arch/x86/gdt.c" "kernel/arch/x86/idt.c" "kernel/arch/x86/pic.c" "kernel/arch/x86/idt_stubs.asm" "kernel/drivers/vga.c" "kernel/drivers/pit.c" "kernel/drivers/console.c" "kernel/drivers/keyboard.c" "kernel/init/bss.c" "kernel/syscall/syscall.c" "kernel/scheduler/scheduler.c" "kernel/fs/fs.c" "user/user.c" "linker/kernel.ld" "Makefile")
 for file in "${files[@]}"; do
     if [ -f "$file" ]; then
         echo "   ✓ $file encontrado"

@@ -32,6 +32,13 @@ SECTIONS
         *(.data.*)       /* Outras seções de dados */
     }
 
+    /* Código da aplicação que roda em modo usuário (ring 3) */
+    .user_text ALIGN(4096) :
+    {
+        *(.user_text)    /* Aplicação do usuário */
+        *(.user_text.*)  /* Outras seções da aplicação */
+    }
+
     /* Seção BSS (dados não inicializados) */
     .bss : ALIGN(4096)
     {

@@ -1,12 +1,2 @@
-# Arquivos compilados
-*.o
-*.bin
-*.elf
-*.iso
-*.img
-*.out
-*.a
-
-# Executáveis sem extensão
-kernel
-kernel_example
+# Artefatos de compilação
+build/
