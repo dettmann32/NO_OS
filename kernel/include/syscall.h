@@ -1,6 +1,16 @@
 #ifndef SYSCALL_H
 #define SYSCALL_H
 
+/*
+ * Syscalls disponíveis ao anel 3.
+ *
+ * Como (como se) funcionam as chamadas: cada inline coloca o nº da
+ * chamada em eax, os argumentos em ebx/ecx/edx e executa `int 0x80`.
+ * O kernel (kernel/syscall/syscall.c) despacha e devolve o
+ * resultado no próprio eax. As regiões "asm volatile" são o ponto
+ * em que o controle pula para o anel 0 (via gate DPL 3 da IDT).
+ */
+
 #include <stdint.h>
 
 #define SYS_WRITE        0

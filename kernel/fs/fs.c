@@ -1,13 +1,30 @@
 #include <stdint.h>
 #include "../include/fs.h"
 
-/* Sistema de arquivos simples em memória (RAM disk):
- * - nó 0 é a raiz "/" (diretório);
- * - cada diretório mantém uma lista encadeada (first_child/next_sibling)
- *   do seus filhos;
- * - cada arquivo guarda o conteúdo em `data` (até FS_MAX_FILE bytes).
+/*
+ * ============================================================
+ * SISTEMA DE ARQUIVOS EM RAM (tinFS)
+ * ============================================================
+ * Não há disco: os "arquivos" vivem aqui, num array de estruturas
+ * (nós), e o conteúdo dorme na própria memória RAM até o boot
+ * reiniciar. Modelo parecido com um inode simplificado.
+ *
+ * Regras do formato:
+ *   - nó 0 é SEMPRE a raiz "/" (diretório);
+ *   - cada diretório tem uma lista encadeada de filhos
+ *     (first_child / next_sibling);
+ *   - arquivos guardam o conteúdo em `data` (até FS_MAX_FILE bytes);
+ *   - type == 0 significa slot LIVRE (reutilizável).
+ *
+ * Quem usa:
+ *   - kernel/syscall/syscall.c (via as syscalls do terminal);
+ *   - kernel/main.c → fs_init() monta a árvore inicial.
+ *
+ * Texto didático completo: docs/08-filesystem.md
+ * ============================================================
  */
 
+/* Cada "arquivo ou diretório" = uma entrada desta tabela. */
 typedef struct {
     uint32_t type;          /* FS_TYPE_DIR ou FS_TYPE_FILE (0 = livre) */
     char name[FS_NAME_MAX];
@@ -24,6 +41,7 @@ static uint32_t node_parent(uint32_t n) {
     return nodes[n].parent;
 }
 
+/* Compara dois nomes (string C até o fim) */
 static int name_eq(const char *a, const char *b) {
     while (*a != '\0' && *b != '\0' && *a == *b) {
         a++;
@@ -53,6 +71,7 @@ static int fs_alloc(uint32_t type, const char *name, uint32_t parent) {
     return -1;
 }
 
+/* Procura um filho com o nome dado dentro do diretório `dir`. */
 int fs_lookup(uint32_t dir, const char *name) {
     if (dir >= FS_MAX_NODES || nodes[dir].type != FS_TYPE_DIR) {
         return -1;
@@ -67,6 +86,7 @@ int fs_lookup(uint32_t dir, const char *name) {
     return -1;
 }
 
+/* Acrescenta `child` no FIM da lista de filhos de `dir`. */
 static void fs_link_child(uint32_t dir, uint32_t child) {
     uint32_t last = nodes[dir].first_child;
     if (last == 0) {
@@ -79,6 +99,7 @@ static void fs_link_child(uint32_t dir, uint32_t child) {
     nodes[last].next_sibling = child;
 }
 
+/* Cria um diretório vazio como filho de `dir`. */
 int fs_mkdir(uint32_t dir, const char *name) {
     if (name[0] == '\0' || dir >= FS_MAX_NODES || nodes[dir].type != FS_TYPE_DIR) {
         return -1;
@@ -94,6 +115,7 @@ int fs_mkdir(uint32_t dir, const char *name) {
     return n;
 }
 
+/* Cria um arquivo vazio (tamanho 0) como filho de `dir`. */
 int fs_create_file(uint32_t dir, const char *name) {
     if (name[0] == '\0' || dir >= FS_MAX_NODES || nodes[dir].type != FS_TYPE_DIR) {
         return -1;
@@ -109,12 +131,13 @@ int fs_create_file(uint32_t dir, const char *name) {
     return n;
 }
 
+/* Grava `data` no arquivo (sobrescreve/seta o tamanho). */
 int fs_write_file(uint32_t node, const char *data, uint32_t len) {
     if (node >= FS_MAX_NODES || nodes[node].type != FS_TYPE_FILE) {
         return -1;
     }
     if (len > FS_MAX_FILE) {
-        len = FS_MAX_FILE;
+        len = FS_MAX_FILE;      /* guarda-chuva: nunca passa do buffer */
     }
     for (uint32_t i = 0; i < len; i++) {
         nodes[node].data[i] = data[i];
@@ -123,6 +146,7 @@ int fs_write_file(uint32_t node, const char *data, uint32_t len) {
     return (int)len;
 }
 
+/* Remove `name` de `dir` (recusa apagar diretório não vazio). */
 int fs_remove(uint32_t dir, const char *name) {
     if (dir >= FS_MAX_NODES || nodes[dir].type != FS_TYPE_DIR) {
         return -1;
@@ -148,6 +172,8 @@ int fs_remove(uint32_t dir, const char *name) {
     return -1;
 }
 
+/* Getters: o código externo (syscall, main) usa estas funções em
+ * vez de tocar na struct diretamente. */
 uint32_t fs_get_type(uint32_t node) {
     return nodes[node].type;
 }
@@ -170,6 +196,7 @@ const char *fs_get_data(uint32_t node) {
     return nodes[node].data;
 }
 
+/* Monta o caminho completo (ex.: "/usr/bin") subindo pelos parent. */
 void fs_build_path(uint32_t node, char *out, uint32_t max) {
     if (node == 0) {
         out[0] = '/';
@@ -179,6 +206,7 @@ void fs_build_path(uint32_t node, char *out, uint32_t max) {
         return;
     }
 
+    /* Empilha os nomes de baixo para cima (do nó até a raiz) */
     char segs[FS_MAX_DEPTH][FS_NAME_MAX];
     int n = 0;
     uint32_t cur = node;
@@ -194,6 +222,7 @@ void fs_build_path(uint32_t node, char *out, uint32_t max) {
         cur = nodes[cur].parent;
     }
 
+    /* Desempilha de cima para baixo, juntando com '/' */
     uint32_t o = 0;
     for (int k = n - 1; k >= 0 && o < max - 1; k--) {
         out[o++] = '/';
@@ -208,7 +237,16 @@ void fs_build_path(uint32_t node, char *out, uint32_t max) {
     out[o] = '\0';
 }
 
-/* Cria o conteúdo inicial de demonstração do sistema de arquivos */
+/* Cria o conteúdo inicial de demonstração do sistema de arquivos:
+ *
+ *   /        (raiz)
+ *   ├── docs/
+ *   │   ├── leiame.txt
+ *   │   └── projetos/
+ *   ├── usr/
+ *   │   └── bin          (arquivo, demonstração do "cd usr; ls bin")
+ *   └── inicio.txt
+ */
 int fs_init(void) {
     for (uint32_t i = 0; i < FS_MAX_NODES; i++) {
         nodes[i].type = 0;

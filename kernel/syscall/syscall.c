@@ -8,6 +8,32 @@
 #include "../include/task.h"
 #include "../include/fs.h"
 
+/*
+ * ============================================================
+ * SYSTEM CALLS — a porta do anel 3 para o anel 0
+ * ============================================================
+ * O terminal (user/user.c) roda no ring 3: ele NÃO pode escrever
+ * na tela nem mexer no sistema de arquivos diretamente — qualquer
+ * acesso seria uma exceção de proteção (GPF). O jeito de o
+ * usuário pedir serviço ao kernel é a instrução `int 0x80`
+ * (vetor 128), que é um gate com DPL 3 na IDT:
+ *
+ *   ├─ int 0x80 → a CPU salva o contexto e pula para syscall80
+ *   │             (assembly: pusha → syscall_handler(); retorna)
+ *   └─ o handler C vê qual chamada foi pedida em eax e despacha:
+ *
+ *        eax = nº da chamada (kernel/include/syscall.h)
+ *        ebx, ecx, edx = argumentos
+ *        valor de retorno volta em eax (mesmo registrador!)
+ *
+ * Este arquivo também implementa os DESCRITORES DE ARQUIVO (fd):
+ * um "alçapão" de kernel para arquivos/diretórios que a tarefa
+ * abriu, para ela nunca manipular índices de nó diretamente.
+ *
+ * Texto didático completo: docs/07-syscalls.md
+ * ============================================================
+ */
+
 extern void syscall80(void);
 
 /* Tabela de descritores de arquivo (um diretório/arquivo aberto) */
@@ -15,12 +41,14 @@ extern void syscall80(void);
 typedef struct {
     int used;
     uint32_t node;
-    uint32_t pos;       /* offest de leitura; diretório: quantas linhas já lidas */
+    uint32_t pos;       /* offset de leitura; diretório: quantas linhas já lidas */
     int writable;
 } filenode_t;
 
 static filenode_t fds[MAX_FDS];
 
+/* Escreve no console do terminal (usado pelo SYS_WRITE - a forma
+ * de o usuário imprimir algo na tela). */
 static void do_write(const char *str, long len) {
     for (long i = 0; i < len && str[i] != '\0'; i++) {
         console_putchar(str[i]);
@@ -90,6 +118,7 @@ static int resolve_dir(task_t *cur, const char *name, uint32_t *node) {
     return 0;
 }
 
+/* SYS_FILE_OPEN: acha um fd livre, resolve o nome e liga o fd ao nó. */
 static int fs_open_sys(task_t *cur, const char *name, int mode) {
     int i;
     for (i = 0; i < MAX_FDS; i++) {
@@ -101,6 +130,7 @@ static int fs_open_sys(task_t *cur, const char *name, int mode) {
         return -1;
     }
 
+    /* "/", "." e ".." nunca podem ser alvo de criação/escrita */
     if (mode != SYS_OPEN_READ &&
         (name[0] == '/' ||
          (name[0] == '.' && name[1] == '\0') ||
@@ -151,6 +181,8 @@ static int fs_open_sys(task_t *cur, const char *name, int mode) {
     return i;
 }
 
+/* SYS_FILE_READ: lê do fd. Diretório devolve uma entrada por
+ * chamada (pos = índice da "linha"); arquivo devolve bytes. */
 static long fs_read_sys(int fd, char *buf, int len) {
     if (fd < 0 || fd >= MAX_FDS || !fds[fd].used) {
         return -1;
@@ -186,6 +218,7 @@ static long fs_read_sys(int fd, char *buf, int len) {
     return n;
 }
 
+/* SYS_FILE_WRITE: escreve no FIM do arquivo e atualiza o tamanho. */
 static long fs_write_sys(int fd, const char *buf, int len) {
     if (fd < 0 || fd >= MAX_FDS || !fds[fd].used || !fds[fd].writable) {
         return -1;
@@ -197,6 +230,9 @@ static long fs_write_sys(int fd, const char *buf, int len) {
     return w;
 }
 
+/* Despachante: recebe o registers_t montado pelo syscall80 do
+ * assembly e decide o que fazer. Lê o nº da chamada de eax e os
+ * argumentos de ebx/ecx/edx; devolve o resultado no próprio eax. */
 void syscall_handler(registers_t *r) {
     task_t *cur = task_current();
 

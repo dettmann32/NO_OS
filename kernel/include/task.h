@@ -1,6 +1,13 @@
 #ifndef TASK_H
 #define TASK_H
 
+/*
+ * TCB (Task Control Block) + API do escalonador round-robin.
+ * Cada tarefa tem a própria pilha de kernel e (se de user) de
+ * usuário; o contexto salvo fica como um frame de iret em
+ * saved_esp (veja scheduler.c e idt_stubs.asm).
+ */
+
 #include <stdint.h>
 
 #define MAX_TASKS         8

@@ -3,17 +3,25 @@
 
 /* ============================================================
  * TERMINAL (shell)
- * Programa chamado pelo kernel na inicialização. É uma tarefa
- * de ring 3 que só usa as syscalls; navega no sistema de
- * arquivos como o bash do Linux: ls, cd, mkdir, touch, cat,
- * echo >, rm, pwd, clear, help.
+ * ============================================================
+ * Programa de RING 3 chamado pelo kernel (main.c: task_create).
+ * Ele NUNCA toca em memória de hardware nem em portas de I/O:
+ * tudo que precisa faz por syscalls (int 0x80 - syscall.h).
+ *
+ * Divide o tempo com o escalonador (preempção a cada 100 ms),
+ * então não é preciso "ceder" a CPU em lugar nenhum.
+ *
+ * Comandos: ls, cd, mkdir, touch, cat, echo >, rm, pwd, clear, help.
+ *
+ * O símbolo fica numa seção própria (.user_text - Makefile/linker)
+ * e é exportado para o kernel descobrir o endereço no link.
  * ============================================================ */
 
 #define LINE_MAX 128
 #define NAME_MAX 32
 
-static char line[LINE_MAX];
-static int line_n;
+static char line[LINE_MAX];      /* a linha de comando digitada */
+static int line_n;               /* quantos caracteres tem agora */
 
 /* ---------- utilidades de string ---------- */
 
@@ -33,6 +41,8 @@ static int str_eq(const char *a, const char *b) {
     return *a == *b;
 }
 
+/* Imprime uma string + quebra de linha (via sys_write).
+ * Ex.: olha de novo - a "tela" aqui é o console do kernel. */
 static void println(const char *s) {
     sys_write(s, str_len(s));
     sys_write("\n", 1);
@@ -43,14 +53,14 @@ static void println(const char *s) {
 static void read_line(void) {
     line_n = 0;
     for (;;) {
-        int c = sys_read();
+        int c = sys_read();              /* syscall: pega a próxima tecla */
         if (c < 0) {
-            continue;
+            continue;                    /* nada digitado ainda */
         }
 
-        if (c == 0x1B) {                    /* Esc: limpa a linha */
+        if (c == 0x1B) {                 /* Esc: limpa a linha */
             for (int i = 0; i < line_n; i++) {
-                sys_write("\b \b", 3);
+                sys_write("\b \b", 3);   /* apaga visualmente com backspace */
             }
             line_n = 0;
             continue;
@@ -59,10 +69,10 @@ static void read_line(void) {
         if (c == '\n') {
             sys_write("\n", 1);
             line[line_n] = '\0';
-            return;
+            return;                      /* Enter: linha pronta p/ rodar */
         }
 
-        if (c == '\b') {                    /* Backspace */
+        if (c == '\b') {                 /* Backspace */
             if (line_n > 0) {
                 sys_write("\b \b", 3);
                 line_n--;
@@ -80,7 +90,7 @@ static void read_line(void) {
 
         line[line_n++] = (char)c;
         char out = (char)c;
-        sys_write(&out, 1);
+        sys_write(&out, 1);              /* ecoa a tecla na tela */
     }
 }
 
@@ -89,6 +99,7 @@ static void read_line(void) {
 static int n_args;
 static char *args[8];
 
+/* Transforma a linha em argv[] estilo C (muta a própria `line`). */
 static void parse_line(void) {
     n_args = 0;
     int i = 0;
@@ -119,7 +130,7 @@ static void cmd_help(void) {
 
 static void cmd_pwd(void) {
     char buf[256];
-    sys_pwd(buf, sizeof(buf));
+    sys_pwd(buf, sizeof(buf));       /* syscall pede o caminho ao kernel */
     println(buf);
 }
 
@@ -229,7 +240,7 @@ static void cmd_echo(int argc, char **argv) {
         sys_fwrite(fd, argv[1], str_len(argv[1]));
         sys_close(fd);
     } else {
-        println(argv[1]);
+        println(argv[1]);                /* echo sem redireção: só imprime */
     }
 }
 
@@ -242,12 +253,15 @@ static void print_prompt(void) {
     sys_write("$ ", 2);
 }
 
+/* Ponto de entrada da tarefa (o kernel pula para cá no primeiro
+ * iret do escalonador). Nunca "retorna": quando o usuário digitar
+ * exit, chama sys_exit -> o escalonador marca a tarefa como DONE. */
 __attribute__((section(".user_text"), used))
 void prog_terminal(void) {
     println("Kernel Bare-Metal x86_64 - Terminal");
     println("Digite 'help' para a lista de comandos.");
 
-    for (;;) {
+    for (;;) {                           /* loop "estilo REPL" */
         print_prompt();
         read_line();
 

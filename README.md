@@ -51,6 +51,7 @@ SO/
 │   ├── run_qemu.sh           # Executa o kernel no QEMU
 │   ├── test_kernel.sh        # Compila e testa
 │   └── final_test.sh         # Verificação do projeto
+├── docs/                     # Documentação didática (parta do docs/README.md)
 ├── Makefile
 └── build/                    # Artefatos de compilação (gerado)
 ```
@@ -69,6 +70,10 @@ SO/
 - **Terminal VGA**: cursor de hardware, Enter, Backspace, Tab e scroll
 
 ## Como usar
+
+> Para entender o código passo a passo, comece em **`docs/README.md`** —
+> a documentação foi escrita para quem conhece C mas nunca programou
+> bare-metal (11 arquivos, do bootloader ao terminal).
 
 1. Compilar o kernel:
 ```bash

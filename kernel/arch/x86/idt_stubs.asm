@@ -1,11 +1,33 @@
-; Stubs das interrupções (32 exceções + 16 IRQs)
-; Compilado com: nasm -f elf32
+; ============================================================
+; STUBS DAS INTERRUPÇÕES (assembly)
+; ============================================================
+; Este é o "elo" entre a CPU/assembly e o C do kernel.
+;
+; Quando uma interrupção acontece, a CPU já deixou na pilha:
+;   EFLAGS, CS, EIP (e SS/ESP se veio do ring 3)
+; -> o stub adiciona um err_code e o número do vetor
+; -> salva todos os registradores (pusha)
+; -> chama o handler em C passando um registers_t*
+;
+; O C e este arquivo formam um ABI combinado: a struct
+; registers_t em kernel/include/registers.h deve espelhar
+; exatamente o layout que estes stubs montam na pilha.
+;
+;   PILHA (do topo para baixo) = registers_t:
+;     edi esi ebp esp ebx edx ecx eax | int_no | err_code | eip cs eflags
+;       └────────── pusha ──────────┘   └── stubs ──┘  └─── CPU ────┘
+;
+; Texto didático completo: docs/04-gdt-idt-pic.md
+; ============================================================
 
 [bits 32]
 
 extern isr_handler
 
-; Exceção SEM código de erro na pilha (empilha 0 no lugar)
+; ------------------------------------------------------------
+; Exceção SEM código de erro na pilha (empilha 0 no lugar),
+; para manter o layout do frame sempre igual.
+; ------------------------------------------------------------
 %macro ISR_NOERR 1
 global isr%1
 isr%1:
@@ -22,7 +44,10 @@ isr%1:
     jmp isr_common_stub
 %endmacro
 
-; IRQ do PIC: nº do IRQ no primeiro argumento, vetor no segundo
+; ------------------------------------------------------------
+; IRQ do PIC: nº do IRQ no primeiro argumento, vetor no segundo.
+; Vetor 32 = IRQ0 do master, 40 = IRQ0 do slave, etc.
+; ------------------------------------------------------------
 %macro IRQ_STUB 2
 global irq%1
 irq%1:
@@ -31,7 +56,7 @@ irq%1:
     jmp isr_common_stub
 %endmacro
 
-; Exceções 0-31
+; Exceções 0-31 (algumas com err_code, a maioria sem)
 ISR_NOERR 0   ; Divisão por zero
 ISR_NOERR 1   ; Debug
 ISR_NOERR 2   ; NMI
@@ -65,7 +90,10 @@ ISR_NOERR 29  ; Reservado
 ISR_NOERR 30  ; Reservado
 ISR_NOERR 31  ; Reservado
 
+; ------------------------------------------------------------
 ; IRQs do PIC: 0-15 mapeados nos vetores 32-47
+; (resultado do pic_remap feito em kernel/arch/x86/pic.c)
+; ------------------------------------------------------------
 IRQ_STUB 0,  32
 IRQ_STUB 1,  33
 IRQ_STUB 2,  34
@@ -83,7 +111,14 @@ IRQ_STUB 13, 45
 IRQ_STUB 14, 46
 IRQ_STUB 15, 47
 
-; Salva os registradores, chama o handler em C e volta
+; ------------------------------------------------------------
+; Handler genérico de interrupção:
+;   1. pusha salva os 8 registradores gerais na pilha do kernel;
+;   2. "push esp" já transforma o topo da pilha num ponteiro para
+;      registers_t (a struct em C);
+;   3. call isr_handler;
+;   4. desfaz tudo e retorna com iret (restaura EFLAGS/CS/EIP).
+; ------------------------------------------------------------
 isr_common_stub:
     pusha
     push esp                    ; ponteiro para registers_t
@@ -94,10 +129,17 @@ isr_common_stub:
     iret
 
 ; ---------------------------------------------------------------
-; Stub dedicado do IRQ0 (timer/PIT): é aqui que acontece a troca
-; de contexto do escalonador. O frame fica na pilha do kernel da
-; tarefa atual; timer_tick() escolhe a próxima e retorna em eax o
-; esp do frame dela (o ponto onde o popa deve começar).
+; STUB DEDICADO DO IRQ0 (timer/PIT)
+; É aqui que acontece a troca de contexto do escalonador.
+;
+; Diferente dos outros, este fluxo NÃO passa pelo isr_handler:
+; o vetor 32 da IDT foi sobrescrito (main.c: idt_set_gate) para
+; apontar para cá. O motivo: a troca de contexto precisa mexer em
+; esp/popa/iret do chamador, o que é impossível de fazer num C
+; comum. O assembly faz isso; o C (timer_tick) só decide o esp.
+;
+; O frame fica na pilha do kernel da tarefa atual; timer_tick()
+; escolhe a próxima e retorna em eax o esp do frame dela.
 ; ---------------------------------------------------------------
 extern timer_tick
 
@@ -120,6 +162,8 @@ irq0_timer_common:
 ; ---------------------------------------------------------------
 ; task_frame_enter(saved_esp): entra na primeira tarefa (e em
 ; qualquer frame já montado), como se ela tivesse sido interrompida.
+; Formato de pilha = registers_t (veja o comentário do topo do
+; arquivo). O "1º parâmetro" ainda está no topo quando chegamos.
 ; ---------------------------------------------------------------
 global task_frame_enter
 task_frame_enter:               ; void task_frame_enter(uint32_t saved_esp)
@@ -128,7 +172,11 @@ task_frame_enter:               ; void task_frame_enter(uint32_t saved_esp)
     add esp, 8
     iret
 
-; Stub do system call int 0x80 (vetor 128)
+; ---------------------------------------------------------------
+; STUB DO SYSTEM CALL int 0x80 (vetor 128)
+; Mesmo formato de frame, mas DPL 3 (gate 0xEE): o anel 3 pode
+; disparar para pedir serviços ao kernel (sys_write, sys_open...).
+; ---------------------------------------------------------------
 extern syscall_handler
 
 global syscall80
@@ -146,6 +194,10 @@ syscall_common_stub:
     add esp, 8
     iret
 
+; ---------------------------------------------------------------
+; Tabela com os endereços dos stubs — é assim que idt.c descobre
+; para onde apontar cada vetor da IDT (isr_stub_table[i]).
+; ---------------------------------------------------------------
 section .data
 global isr_stub_table
 isr_stub_table:

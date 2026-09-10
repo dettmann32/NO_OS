@@ -1,10 +1,17 @@
 #ifndef FS_H
 #define FS_H
 
+/*
+ * Sistema de arquivos em RAM (kernel/fs/fs.c):
+ * FS_MAX_NODES nós (128) numa tabela estática; o nó 0 é sempre a
+ * raiz "/". FS_MAX_DEPTH é o limite de diretórios no caminho
+ * (para o fs_build_path) e FS_MAX_FILE o tamanho máximo de arquivo.
+ */
+
 #include <stdint.h>
 
-#define FS_TYPE_DIR   1
-#define FS_TYPE_FILE  2
+#define FS_TYPE_DIR   1    /* nó é diretório */
+#define FS_TYPE_FILE  2    /* nó é arquivo  */
 
 #define FS_NAME_MAX   24
 #define FS_MAX_NODES  128

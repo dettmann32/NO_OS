@@ -3,10 +3,37 @@
 #include "../include/vga.h"
 #include "../include/io.h"
 
+/*
+ * ============================================================
+ * CONSOLE — terminal com cursor de hardware e scroll
+ * ============================================================
+ * O VGA apenas escreve numa célula fixa. O console é a camada
+ * que mantém A POSIÇÃO ATUAL do cursor (cursor_x, cursor_y) e
+ * implementa os caracteres especiais:
+ *
+ *   '\n' → quebra de linha (cursor_x = 0, cursor_y++)
+ *   '\b' → backspace (apaga o char anterior)
+ *   '\t' → tab (alinhar a 8 colunas)
+ *
+ * Quando o cursor passa da última linha, faz SCROLL (o texto
+ * sobe uma linha e a última fica em branco).
+ *
+ * Além disso controla o CURSOR DE HARDWARE do VGA: o pisca-pisca
+ * da tela, configurado pelas portas CRTC 0x3D4/0x3D5.
+ *
+ * Texto didático completo: docs/05-drivers.md
+ * ============================================================
+ */
+
 static int cursor_x = 0;
 static int cursor_y = 0;
 
-/* Atualiza o cursor de hardware do VGA (portas 0x3D4/0x3D5) */
+/*
+ * Cursor de hardware (o "pisca" que o próprio adaptador desenha).
+ * Posição = cursor_y * 80 + cursor_x (0..1999), em 2 bytes (low/high).
+ * Escreve-se nas portas 0x3D4/0x3D5 (CRTC): primeiro escolhe o
+ * registrador (0x0F = cursor low, 0x0E = cursor high), depois o valor.
+ */
 static void update_cursor(void) {
     uint16_t pos = cursor_y * VGA_WIDTH + cursor_x;
 
@@ -41,6 +68,7 @@ void console_set_cursor(int x, int y) {
     update_cursor();
 }
 
+/* A "primitiva" do terminal: um caractere, com todas as regras. */
 void console_putchar(char c) {
     if (c == '\n') {
         cursor_x = 0;
@@ -62,10 +90,12 @@ void console_putchar(char c) {
         cursor_x++;
     }
 
+    /* Quebra de linha automática ao chegar na borda direita. */
     if (cursor_x >= VGA_WIDTH) {
         cursor_x = 0;
         cursor_y++;
     }
+    /* Scroll automático ao passar do fim da tela. */
     if (cursor_y >= VGA_HEIGHT) {
         scroll();
     }
