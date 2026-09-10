@@ -1,10 +1,13 @@
 #!/bin/bash
-# Script para testar o kernel
+# Script para compilar e testar o kernel
+
+# Ir para a raiz do projeto (caminho relativo ao script, não ao CWD)
+cd "$(dirname "$0")/.." || exit 1
 
 echo "=== Teste do Kernel Bare-Metal ==="
 echo ""
 
-# Compilar tudo (boot.bin, kernel.bin e os.img)
+# Compilar tudo (build/boot.bin, build/kernel.bin e build/os.img)
 echo "Compilando..."
 make clean >/dev/null
 if ! make; then
@@ -14,7 +17,7 @@ fi
 echo ""
 
 # Verificar se os arquivos existem
-for file in boot.bin kernel.bin os.img; do
+for file in build/boot.bin build/kernel.bin build/os.img; do
     if [ ! -f "$file" ]; then
         echo "Erro: $file não encontrado!"
         exit 1
@@ -22,7 +25,7 @@ for file in boot.bin kernel.bin os.img; do
 done
 
 echo "Arquivos gerados:"
-ls -lh boot.bin kernel.bin os.img
+ls -lh build/boot.bin build/kernel.bin build/os.img
 echo ""
 
 # Testar com QEMU
@@ -30,4 +33,4 @@ echo "Iniciando teste com QEMU..."
 echo "Pressione Ctrl+A X para sair do QEMU"
 echo ""
 
-qemu-system-x86_64 -drive file=os.img,format=raw -m 128M
+qemu-system-x86_64 -drive file=build/os.img,format=raw -m 128M
