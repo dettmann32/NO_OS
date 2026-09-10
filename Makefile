@@ -4,57 +4,75 @@
 CC = gcc
 CFLAGS = -ffreestanding -fno-pie -fno-pic -fno-stack-protector -fno-builtin \
          -m32 -mno-mmx -mno-sse -mno-sse2 -O2 -Wall -Wextra -c
-LDFLAGS = -m elf_i386 -T kernel.ld -nostdlib
+LDFLAGS = -m elf_i386 -T linker/kernel.ld -nostdlib
 
 NASM = nasm
-NASMFLAGS = -f bin
+NASMFLAGS = -f bin      # bootloader (binário puro)
+NASM_FLAT = -f elf32    # assembly do kernel (objeto ELF)
 
 DISK_SIZE = 1474560  # 1.44 MB (imagem de disquete)
 
-# Arquivos de origem
-OBJS = kernel.o
-EXAMPLE_OBJS = kernel_example.o
+# Fontes do kernel (entry point, arquitetura, drivers e inicialização)
+SOURCES = kernel/main.c \
+          kernel/arch/x86/gdt.c \
+          kernel/arch/x86/idt.c \
+          kernel/arch/x86/pic.c \
+          kernel/drivers/vga.c \
+          kernel/drivers/pit.c \
+          kernel/drivers/console.c \
+          kernel/drivers/keyboard.c \
+          kernel/init/bss.c \
+          kernel/syscall/syscall.c \
+          kernel/scheduler/scheduler.c \
+          kernel/fs/fs.c
+ASM_SOURCES = kernel/arch/x86/idt_stubs.asm
+
+OBJECTS = $(patsubst kernel/%.c,build/%.o,$(SOURCES)) \
+          build/user.o \
+          $(patsubst kernel/%.asm,build/%.o,$(ASM_SOURCES))
+SUBDIRS = $(sort $(dir $(OBJECTS)))
 
 # Regra principal: monta a imagem de disco completa (boot + kernel)
-all: os.img kernel_example.bin
+all: build/os.img
 
-# Montar imagem de disco: bootloader no setor 0, kernel a partir do setor 1
-os.img: boot.bin kernel.bin
-	cp boot.bin os.img
-	truncate -s $(DISK_SIZE) os.img
-	dd if=kernel.bin of=os.img bs=512 seek=1 conv=notrunc status=none
+build:
+	mkdir -p $(SUBDIRS)
 
 # Compilar bootloader com NASM
-boot.bin: boot.asm
-	$(NASM) $(NASMFLAGS) boot.asm -o boot.bin
+build/boot.bin: boot/boot.asm | build
+	$(NASM) $(NASMFLAGS) $< -o $@
 
-# Compilar kernel.c para kernel.o
-kernel.o: kernel.c
-	$(CC) $(CFLAGS) kernel.c -o kernel.o
+# Compilar cada fonte do kernel (C)
+build/%.o: kernel/%.c | build
+	$(CC) $(CFLAGS) $< -o $@
 
-# Compilar kernel_example.c para kernel_example.o
-kernel_example.o: kernel_example.c
-	$(CC) $(CFLAGS) kernel_example.c -o kernel_example.o
+# Compilar a aplicação do usuário (roda em ring 3, própria seção)
+build/user.o: user/user.c | build
+	$(CC) $(CFLAGS) $< -o $@
 
-# Linkar kernel.o usando kernel.ld e converter para binário puro
-kernel.elf: kernel.o kernel.ld
-	ld $(LDFLAGS) kernel.o -o kernel.elf
+# Compilar cada fonte do kernel (Assembly ELF)
+build/%.o: kernel/%.asm | build
+	$(NASM) $(NASM_FLAT) $< -o $@
 
-kernel.bin: kernel.elf
-	objcopy -O binary kernel.elf $@
+# Linkar os objetos usando o linker script e converter para binário puro
+build/kernel.elf: $(OBJECTS) linker/kernel.ld
+	ld $(LDFLAGS) $(OBJECTS) -o $@
 
-# Linkar kernel_example.o usando kernel.ld e converter para binário puro
-kernel_example.elf: kernel_example.o kernel.ld
-	ld $(LDFLAGS) kernel_example.o -o kernel_example.elf
+build/kernel.bin: build/kernel.elf
+	objcopy -O binary $< $@
 
-kernel_example.bin: kernel_example.elf
-	objcopy -O binary kernel_example.elf $@
+# Montar imagem de disco: bootloader no setor 0, kernel a partir do setor 1
+build/os.img: build/boot.bin build/kernel.bin
+	cp build/boot.bin $@
+	truncate -s $(DISK_SIZE) $@
+	dd if=build/kernel.bin of=$@ bs=512 seek=1 conv=notrunc status=none
+
+# Rodar no QEMU
+run: build/os.img
+	qemu-system-x86_64 -drive file=build/os.img,format=raw -m 128M
 
 # Limpar arquivos gerados
 clean:
-	rm -f *.o *.elf *.bin *.tmp os.img
+	rm -rf build
 
 .PHONY: all clean run
-
-run: os.img
-	qemu-system-x86_64 -drive file=os.img,format=raw -m 128M
